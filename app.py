@@ -38,9 +38,31 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"
 ]
 
+# 갤러리 영구 저장 파일 (서버 재시작해도 유지)
+import json
+GALLERIES_FILE = "/tmp/galleries.json"
+
+def load_galleries():
+    """저장된 갤러리 목록 로드"""
+    try:
+        with open(GALLERIES_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        # 환경변수 또는 기본값
+        default = os.environ.get("DEFAULT_GALLERIES", "thesingularity")
+        return default.split(",")
+
+def save_galleries(galleries):
+    """갤러리 목록 저장"""
+    try:
+        with open(GALLERIES_FILE, 'w') as f:
+            json.dump(galleries, f)
+    except:
+        pass
+
 CRAWLER_STATE = {
     "enabled": True,
-    "galleries": ["thesingularity"]
+    "galleries": load_galleries()
 }
 
 # ============================================================
@@ -164,7 +186,7 @@ class DCInsideCrawler(BaseCrawler):
                     if src.startswith('//'):
                         src = 'https:' + src
                     images.append(src)
-        return {"content": content, "images": images[:5]}
+        return {"content": content, "images": images[:20]}
 
 CRAWLERS = {"dcinside": DCInsideCrawler}
 
@@ -346,6 +368,7 @@ def webhook():
             gallery_id = text[5:].strip()
             if gallery_id and gallery_id not in CRAWLER_STATE['galleries']:
                 CRAWLER_STATE['galleries'].append(gallery_id)
+                save_galleries(CRAWLER_STATE['galleries'])  # 저장
                 send_telegram(f"✅ 갤러리 추가됨: {gallery_id}", get_main_menu())
             else:
                 send_telegram("❌ 이미 존재하거나 잘못된 ID", get_main_menu())
@@ -354,6 +377,7 @@ def webhook():
             gallery_id = text[8:].strip()
             if gallery_id in CRAWLER_STATE['galleries']:
                 CRAWLER_STATE['galleries'].remove(gallery_id)
+                save_galleries(CRAWLER_STATE['galleries'])  # 저장
                 send_telegram(f"✅ 갤러리 제거됨: {gallery_id}", get_main_menu())
             else:
                 send_telegram("❌ 존재하지 않는 갤러리", get_main_menu())
@@ -366,11 +390,16 @@ def webhook():
             CRAWLER_STATE['enabled'] = True
             send_telegram("▶️ 크롤러 재개됨", get_main_menu())
         
+        elif text == '/crawl':
+            # 수동 크롤링 트리거 (GAS가 /trigger 엔드포인트를 호출하도록 안내)
+            send_telegram("🔄 수동 크롤링을 시작하려면 GAS에서 testCrawling()을 실행하세요.\n\n또는 Apps Script에서 직접 실행!")
+        
         elif text == '/help':
             help_text = "🤖 <b>명령어</b>\n\n"
             help_text += "/menu - 버튼 메뉴\n"
             help_text += "/add [ID] - 갤러리 추가\n"
-            help_text += "/remove [ID] - 갤러리 제거"
+            help_text += "/remove [ID] - 갤러리 제거\n"
+            help_text += "/crawl - 수동 크롤링 안내"
             send_telegram(help_text, get_main_menu())
         
         return jsonify({'ok': True})
