@@ -176,11 +176,37 @@ def verify_api_key():
     key = request.headers.get("X-API-Key") or request.args.get("api_key")
     return key and key == API_SECRET_KEY
 
-def send_telegram(text):
+def send_telegram(text, reply_markup=None):
     try:
+        payload = {"chat_id": ADMIN_CHAT_ID, "text": text, "parse_mode": "HTML"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": ADMIN_CHAT_ID, "text": text, "parse_mode": "HTML"},
+            json=payload,
+            timeout=10
+        )
+    except:
+        pass
+
+def get_main_menu():
+    """메인 메뉴 인라인 키보드"""
+    return {
+        "inline_keyboard": [
+            [{"text": "📊 상태", "callback_data": "status"}, 
+             {"text": "📁 갤러리", "callback_data": "galleries"}],
+            [{"text": "⏸️ 정지", "callback_data": "pause"}, 
+             {"text": "▶️ 재개", "callback_data": "resume"}],
+            [{"text": "❓ 도움말", "callback_data": "help"}]
+        ]
+    }
+
+def answer_callback(callback_id, text=""):
+    """콜백 쿼리 응답"""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": callback_id, "text": text},
             timeout=10
         )
     except:
@@ -255,60 +281,97 @@ def crawl_detail():
 def webhook():
     try:
         data = request.get_json()
+        
+        # 콜백 쿼리 처리 (버튼 클릭)
+        callback = data.get('callback_query')
+        if callback:
+            callback_id = callback.get('id')
+            chat_id = str(callback.get('from', {}).get('id', ''))
+            action = callback.get('data', '')
+            
+            if chat_id != str(ADMIN_CHAT_ID):
+                return jsonify({'ok': True})
+            
+            answer_callback(callback_id)
+            
+            if action == 'status':
+                status_text = f"🤖 <b>크롤러 상태</b>\n\n"
+                status_text += f"상태: {'✅ 동작중' if CRAWLER_STATE['enabled'] else '⏸️ 정지'}\n"
+                status_text += f"갤러리: {', '.join(CRAWLER_STATE['galleries'])}"
+                send_telegram(status_text, get_main_menu())
+            elif action == 'galleries':
+                gall_text = "📁 <b>갤러리 목록</b>\n\n"
+                for i, g in enumerate(CRAWLER_STATE['galleries'], 1):
+                    gall_text += f"{i}. {g}\n"
+                send_telegram(gall_text, get_main_menu())
+            elif action == 'pause':
+                CRAWLER_STATE['enabled'] = False
+                send_telegram("⏸️ 크롤러 정지됨", get_main_menu())
+            elif action == 'resume':
+                CRAWLER_STATE['enabled'] = True
+                send_telegram("▶️ 크롤러 재개됨", get_main_menu())
+            elif action == 'help':
+                help_text = "🤖 <b>명령어</b>\n\n"
+                help_text += "/menu - 버튼 메뉴\n"
+                help_text += "/add [ID] - 갤러리 추가\n"
+                help_text += "/remove [ID] - 갤러리 제거"
+                send_telegram(help_text, get_main_menu())
+            
+            return jsonify({'ok': True})
+        
+        # 일반 메시지 처리
         msg = data.get('message', {})
         chat_id = str(msg.get('chat', {}).get('id', ''))
         text = msg.get('text', '').strip()
         
-        # [보안] 관리자가 아니면 무시
         if chat_id != str(ADMIN_CHAT_ID):
             return jsonify({'ok': True})
         
-        if text == '/status':
+        if text == '/start' or text == '/menu':
+            send_telegram("🤖 <b>크롤러 제어판</b>\n\n버튼을 눌러 제어하세요:", get_main_menu())
+        
+        elif text == '/status':
             status_text = f"🤖 <b>크롤러 상태</b>\n\n"
             status_text += f"상태: {'✅ 동작중' if CRAWLER_STATE['enabled'] else '⏸️ 정지'}\n"
             status_text += f"갤러리: {', '.join(CRAWLER_STATE['galleries'])}"
-            send_telegram(status_text)
+            send_telegram(status_text, get_main_menu())
         
         elif text == '/galleries':
             gall_text = "📁 <b>갤러리 목록</b>\n\n"
             for i, g in enumerate(CRAWLER_STATE['galleries'], 1):
                 gall_text += f"{i}. {g}\n"
-            send_telegram(gall_text)
+            send_telegram(gall_text, get_main_menu())
         
         elif text.startswith('/add '):
             gallery_id = text[5:].strip()
             if gallery_id and gallery_id not in CRAWLER_STATE['galleries']:
                 CRAWLER_STATE['galleries'].append(gallery_id)
-                send_telegram(f"✅ 갤러리 추가됨: {gallery_id}")
+                send_telegram(f"✅ 갤러리 추가됨: {gallery_id}", get_main_menu())
             else:
-                send_telegram("❌ 이미 존재하거나 잘못된 ID")
+                send_telegram("❌ 이미 존재하거나 잘못된 ID", get_main_menu())
         
         elif text.startswith('/remove '):
             gallery_id = text[8:].strip()
             if gallery_id in CRAWLER_STATE['galleries']:
                 CRAWLER_STATE['galleries'].remove(gallery_id)
-                send_telegram(f"✅ 갤러리 제거됨: {gallery_id}")
+                send_telegram(f"✅ 갤러리 제거됨: {gallery_id}", get_main_menu())
             else:
-                send_telegram("❌ 존재하지 않는 갤러리")
+                send_telegram("❌ 존재하지 않는 갤러리", get_main_menu())
         
         elif text == '/pause':
             CRAWLER_STATE['enabled'] = False
-            send_telegram("⏸️ 크롤러 정지됨")
+            send_telegram("⏸️ 크롤러 정지됨", get_main_menu())
         
         elif text == '/resume':
             CRAWLER_STATE['enabled'] = True
-            send_telegram("▶️ 크롤러 재개됨")
+            send_telegram("▶️ 크롤러 재개됨", get_main_menu())
         
         elif text == '/help':
-            help_text = """🤖 <b>명령어</b>
-
-/status - 상태 확인
-/galleries - 갤러리 목록
-/add [ID] - 갤러리 추가
-/remove [ID] - 갤러리 제거
-/pause - 크롤링 정지
-/resume - 크롤링 재개"""
-            send_telegram(help_text)
+            help_text = "🤖 <b>명령어</b>\n\n"
+            help_text += "/menu - 버튼 메뉴\n"
+            help_text += "/add [ID] - 갤러리 추가\n"
+            help_text += "/remove [ID] - 갤러리 제거"
+            send_telegram(help_text, get_main_menu())
         
         return jsonify({'ok': True})
     except:
