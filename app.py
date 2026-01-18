@@ -1,20 +1,23 @@
 """
-디시인사이드 크롤링 API 서버
+디시인사이드 크롤링 API 서버 (보안 강화 버전)
+- API Key 인증 추가
 - Render/Railway 등에 무료 배포 가능
-- GAS에서 이 API를 호출하여 데이터 수집
 """
 
 from flask import Flask, jsonify, request
 import requests
 from bs4 import BeautifulSoup
-import re
+import os
 from datetime import datetime
 
 app = Flask(__name__)
 
 # ============================================================
-# 📌 설정
+# 📌 설정 - 환경변수에서 API Key 가져오기
 # ============================================================
+
+# Render 대시보드 > Environment에서 설정하세요
+API_SECRET_KEY = os.environ.get("API_SECRET_KEY", "default-secret-key-change-me")
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -36,39 +39,47 @@ HEADERS = {
 }
 
 # ============================================================
+# 📌 API Key 인증 함수
+# ============================================================
+
+def verify_api_key():
+    """요청의 API Key 검증"""
+    provided_key = request.headers.get("X-API-Key") or request.args.get("api_key")
+    
+    if not provided_key:
+        return False, "API Key가 필요합니다"
+    
+    if provided_key != API_SECRET_KEY:
+        return False, "잘못된 API Key입니다"
+    
+    return True, None
+
+# ============================================================
 # 📌 크롤링 함수
 # ============================================================
 
 def crawl_dcinside(gallery_id: str, page: int = 1, recommend_only: bool = True) -> dict:
     """디시인사이드 갤러리 크롤링"""
     try:
-        # URL 구성
         if recommend_only:
             url = f"https://gall.dcinside.com/mgallery/board/lists/?id={gallery_id}&exception_mode=recommend&page={page}"
         else:
             url = f"https://gall.dcinside.com/mgallery/board/lists/?id={gallery_id}&page={page}"
         
-        # 요청
         session = requests.Session()
         response = session.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         
-        # HTML 파싱
         soup = BeautifulSoup(response.text, 'html.parser')
-        
         posts = []
-        
-        # 게시글 행 추출
         rows = soup.select('tr.ub-content')
         
         for row in rows:
             try:
-                # 게시글 번호
                 post_id = row.get('data-no', '')
                 if not post_id:
                     continue
                 
-                # 제목
                 title_elem = row.select_one('td.gall_tit a')
                 if not title_elem:
                     continue
@@ -76,23 +87,18 @@ def crawl_dcinside(gallery_id: str, page: int = 1, recommend_only: bool = True) 
                 title = title_elem.get_text(strip=True)
                 link = title_elem.get('href', '')
                 
-                # 절대 경로로 변환
                 if link.startswith('/'):
                     link = f"https://gall.dcinside.com{link}"
                 
-                # 날짜
                 date_elem = row.select_one('td.gall_date')
                 date = date_elem.get('title', '') or date_elem.get_text(strip=True) if date_elem else ''
                 
-                # 작성자
                 writer_elem = row.select_one('td.gall_writer')
                 writer = writer_elem.get('data-nick', '') if writer_elem else ''
                 
-                # 조회수
                 count_elem = row.select_one('td.gall_count')
                 view_count = count_elem.get_text(strip=True) if count_elem else ''
                 
-                # 추천수
                 recommend_elem = row.select_one('td.gall_recommend')
                 recommend = recommend_elem.get_text(strip=True) if recommend_elem else ''
                 
@@ -118,17 +124,9 @@ def crawl_dcinside(gallery_id: str, page: int = 1, recommend_only: bool = True) 
         }
         
     except requests.exceptions.RequestException as e:
-        return {
-            'success': False,
-            'error': f'요청 에러: {str(e)}',
-            'posts': []
-        }
+        return {'success': False, 'error': f'요청 에러: {str(e)}', 'posts': []}
     except Exception as e:
-        return {
-            'success': False,
-            'error': f'크롤링 에러: {str(e)}',
-            'posts': []
-        }
+        return {'success': False, 'error': f'크롤링 에러: {str(e)}', 'posts': []}
 
 # ============================================================
 # 📌 API 엔드포인트
@@ -138,9 +136,10 @@ def crawl_dcinside(gallery_id: str, page: int = 1, recommend_only: bool = True) 
 def home():
     return jsonify({
         'status': 'ok',
-        'message': '디시인사이드 크롤링 API 서버',
+        'message': '디시인사이드 크롤링 API 서버 (보안 버전)',
+        'auth_required': True,
         'endpoints': {
-            '/crawl': 'GET - 갤러리 크롤링 (파라미터: gallery_id, page, recommend_only)',
+            '/crawl': 'GET - 갤러리 크롤링 (API Key 필요)',
             '/health': 'GET - 서버 상태 확인'
         }
     })
@@ -152,13 +151,21 @@ def health():
 @app.route('/crawl')
 def crawl():
     """
-    갤러리 크롤링 API
+    갤러리 크롤링 API (인증 필요)
+    
+    헤더:
+    - X-API-Key: API 비밀키
     
     쿼리 파라미터:
-    - gallery_id: 갤러리 ID (필수, 예: thesingularity)
+    - gallery_id: 갤러리 ID (필수)
     - page: 페이지 번호 (선택, 기본값: 1)
     - recommend_only: 개념글만 (선택, 기본값: true)
     """
+    # API Key 검증
+    is_valid, error_msg = verify_api_key()
+    if not is_valid:
+        return jsonify({'success': False, 'error': error_msg}), 401
+    
     gallery_id = request.args.get('gallery_id', 'thesingularity')
     page = request.args.get('page', 1, type=int)
     recommend_only = request.args.get('recommend_only', 'true').lower() == 'true'
@@ -171,6 +178,5 @@ def crawl():
 # ============================================================
 
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
