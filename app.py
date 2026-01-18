@@ -121,14 +121,34 @@ class BaseCrawler(ABC):
 # ============================================================
 
 class DCInsideCrawler(BaseCrawler):
+    def _is_major_gallery(self, gallery_id):
+        """일반갤러리 여부 확인 (g: 접두사)"""
+        return gallery_id.startswith("g:")
+    
+    def _get_real_id(self, gallery_id):
+        """실제 갤러리 ID 추출"""
+        if gallery_id.startswith("g:"):
+            return gallery_id[2:]
+        return gallery_id
+    
     def get_list_url(self, gallery_id, page, recommend_only):
-        base = f"https://gall.dcinside.com/mgallery/board/lists/?id={gallery_id}&page={page}"
+        real_id = self._get_real_id(gallery_id)
+        if self._is_major_gallery(gallery_id):
+            # 일반갤러리
+            base = f"https://gall.dcinside.com/board/lists/?id={real_id}&page={page}"
+        else:
+            # 마이너갤러리
+            base = f"https://gall.dcinside.com/mgallery/board/lists/?id={real_id}&page={page}"
         if recommend_only:
             base += "&exception_mode=recommend"
         return base
     
     def get_detail_url(self, post_id, gallery_id):
-        return f"https://gall.dcinside.com/mgallery/board/view/?id={gallery_id}&no={post_id}"
+        real_id = self._get_real_id(gallery_id)
+        if self._is_major_gallery(gallery_id):
+            return f"https://gall.dcinside.com/board/view/?id={real_id}&no={post_id}"
+        else:
+            return f"https://gall.dcinside.com/mgallery/board/view/?id={real_id}&no={post_id}"
     
     def parse_list(self, html):
         soup = BeautifulSoup(html, 'html.parser')
