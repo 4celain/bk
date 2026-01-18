@@ -49,7 +49,7 @@ def load_galleries():
             return json.load(f)
     except:
         # 환경변수 또는 기본값
-        default = os.environ.get("DEFAULT_GALLERIES", "thesingularity")
+        default = os.environ.get("DEFAULT_GALLERIES", "chzzk")
         return default.split(",")
 
 def save_galleries(galleries):
@@ -237,6 +237,8 @@ def get_main_menu():
         "inline_keyboard": [
             [{"text": "📊 상태", "callback_data": "status"}, 
              {"text": "📁 갤러리", "callback_data": "galleries"}],
+            [{"text": "➕ 추가", "callback_data": "add_prompt"}, 
+             {"text": "➖ 제거", "callback_data": "remove_prompt"}],
             [{"text": "⏸️ 정지", "callback_data": "pause"}, 
              {"text": "▶️ 재개", "callback_data": "resume"}],
             [{"text": "❓ 도움말", "callback_data": "help"}]
@@ -358,6 +360,14 @@ def webhook():
                 help_text += "/add [ID] - 갤러리 추가\n"
                 help_text += "/remove [ID] - 갤러리 제거"
                 send_telegram(help_text, get_main_menu())
+            elif action == 'add_prompt':
+                send_telegram("➕ <b>갤러리 추가</b>\n\n/add [갤러리ID] 형식으로 입력\n\n예시:\n• 마이너: /add chzzk\n• 일반: /add g:programming")
+            elif action == 'remove_prompt':
+                gall_text = "➖ <b>갤러리 제거</b>\n\n현재 목록:\n"
+                for i, g in enumerate(CRAWLER_STATE['galleries'], 1):
+                    gall_text += f"{i}. {g}\n"
+                gall_text += "\n/remove [갤러리ID] 형식으로 입력"
+                send_telegram(gall_text)
             
             return jsonify({'ok': True})
         
